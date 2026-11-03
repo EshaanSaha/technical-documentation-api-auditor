@@ -1,0 +1,15 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.env
+data/uploads/*
+!data/uploads/.gitkeep
+data/models/*
+!data/models/.gitkeep
+data/*.db
+data/*.db-journal
+logs/
+presentation/
+scripts/generate_presentation_pptx.py
+

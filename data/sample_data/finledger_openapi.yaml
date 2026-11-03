@@ -1,0 +1,666 @@
+openapi: 3.0.3
+info:
+  title: FinLedger Enterprise Banking & Payments API
+  version: 3.4.0
+  description: Core treasury, multi-currency accounts, ACH/wire transfers, corporate card issuing, FX quotes, compliance KYC and webhook management API.
+servers:
+  - url: https://api.finledger.io/v3
+security:
+  - bearerAuth: []
+tags:
+  - name: Accounts
+  - name: Transfers
+  - name: Cards
+  - name: FX & Treasury
+  - name: Compliance & Webhooks
+
+paths:
+  /accounts:
+    get:
+      tags: [Accounts]
+      operationId: listAccounts
+      summary: List treasury accounts
+      description: Returns a paginated list of corporate treasury accounts across all operating currencies and legal entities.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - name: currency
+          in: query
+          required: false
+          description: Filter accounts by three-letter ISO 4217 currency code.
+          schema: {type: string}
+        - name: status
+          in: query
+          required: false
+          description: Filter accounts by operational status (active, frozen, closed).
+          schema: {type: string, enum: [active, frozen, closed]}
+      responses:
+        '200':
+          description: A paginated list of accounts.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AccountList'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+    post:
+      tags: [Accounts]
+      operationId: createAccount
+      summary: Open a treasury account
+      description: Opens a new multi-currency corporate sub-account under the authenticated organization and assigns a dedicated IBAN and routing number.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AccountCreate'}
+      responses:
+        '201':
+          description: The newly opened treasury account.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Account'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '409':
+          description: An account with the same nickname and currency already exists.
+
+  /accounts/{account_id}:
+    parameters:
+      - $ref: '#/components/parameters/AccountId'
+    get:
+      tags: [Accounts]
+      operationId: getAccount
+      summary: Retrieve an account
+      description: Retrieves real-time available balance, ledger balance and routing details for a specific treasury account.
+      responses:
+        '200':
+          description: The treasury account details.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Account'}
+        '404': {$ref: '#/components/responses/NotFound'}
+
+  /accounts/{account_id}/freeze:
+    post:
+      tags: [Accounts]
+      operationId: freezeAccount
+      summary: Freeze a treasury account
+      description: Immediately blocks all outbound transfers and card authorizations on the specified treasury account while allowing inbound settlement.
+      parameters:
+        - $ref: '#/components/parameters/AccountId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason, compliance_ticket_id]
+              properties:
+                reason: {type: string, description: Mandatory explanation for freezing the account.}
+                compliance_ticket_id: {type: string, description: Internal compliance case reference ID.}
+      responses:
+        '200':
+          description: The frozen account.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Account'}
+        '404': {$ref: '#/components/responses/NotFound'}
+
+  /accounts/{account_id}/transactions:
+    get:
+      tags: [Accounts]
+      operationId: listAccountTransactions
+      summary: List ledger transactions
+      description: Returns settled and pending ledger entries for the specified account in reverse chronological order.
+      parameters:
+        - $ref: '#/components/parameters/AccountId'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - name: min_amount_cents
+          in: query
+          required: false
+          description: Filter transactions with an absolute amount greater than or equal to this value in minor units (cents).
+          schema: {type: integer}
+        - name: direction
+          in: query
+          required: false
+          description: Filter by credit or debit ledger entries.
+          schema: {type: string, enum: [credit, debit]}
+      responses:
+        '200':
+          description: Paginated ledger transactions.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/TransactionList'}
+        '404': {$ref: '#/components/responses/NotFound'}
+
+  /transfers:
+    get:
+      tags: [Transfers]
+      operationId: listTransfers
+      summary: List outbound transfers
+      description: Lists ACH, SEPA and domestic/international wire transfers initiated by the organization.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - name: source_account_id
+          in: query
+          required: false
+          description: Only return transfers debited from this treasury account.
+          schema: {type: string, format: uuid}
+        - name: rail
+          in: query
+          required: false
+          description: Payment rail used for the transfer (ach, wire, sepa, swift).
+          schema: {type: string, enum: [ach, wire, sepa, swift]}
+      responses:
+        '200':
+          description: Paginated list of transfers.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/TransferList'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+    post:
+      tags: [Transfers]
+      operationId: createTransfer
+      summary: Initiate a payment transfer
+      description: Initiates an outbound ACH, SEPA or wire payment from a source treasury account to an external beneficiary. Funds are reserved immediately.
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Mandatory UUID key preventing duplicate payment execution across retries.
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/TransferCreate'}
+      responses:
+        '201':
+          description: The initiated transfer.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Transfer'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '422':
+          description: Insufficient available balance or sanctions screening hold.
+
+  /transfers/{transfer_id}:
+    get:
+      tags: [Transfers]
+      operationId: getTransfer
+      summary: Retrieve a transfer
+      description: Retrieves settlement status, IMAD/OMAD wire trace numbers and beneficiary details for a single transfer.
+      parameters:
+        - $ref: '#/components/parameters/TransferId'
+      responses:
+        '200':
+          description: The transfer record.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Transfer'}
+        '404': {$ref: '#/components/responses/NotFound'}
+
+  /transfers/{transfer_id}/recall:
+    post:
+      tags: [Transfers]
+      operationId: recallTransfer
+      summary: Recall a transfer
+      description: Submits a recall or cancellation request for an outbound transfer that has not yet been settled by the receiving clearing house.
+      parameters:
+        - $ref: '#/components/parameters/TransferId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [recall_reason]
+              properties:
+                recall_reason: {type: string, enum: [duplicate_payment, fraudulent_origin, incorrect_amount]}
+                notes: {type: string}
+      responses:
+        '202':
+          description: Recall request accepted for clearing house processing.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Transfer'}
+        '409':
+          description: Transfer has already settled and cannot be recalled automatically.
+
+  /cards:
+    get:
+      tags: [Cards]
+      operationId: listCards
+      summary: List corporate cards
+      description: Lists virtual and physical commercial cards issued under the organization's treasury accounts.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - name: cardholder_email
+          in: query
+          required: false
+          description: Filter cards assigned to a specific employee email address.
+          schema: {type: string, format: email}
+        - name: card_type
+          in: query
+          required: false
+          description: Filter by virtual or physical form factor.
+          schema: {type: string, enum: [virtual, physical]}
+      responses:
+        '200':
+          description: List of issued corporate cards.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CardList'}
+    post:
+      tags: [Cards]
+      operationId: issueCard
+      summary: Issue a corporate card
+      description: Issues a new virtual or physical corporate card backed by a designated treasury account with configurable velocity limits.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CardCreate'}
+      responses:
+        '201':
+          description: The newly issued corporate card.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Card'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+
+  /cards/{card_id}:
+    get:
+      tags: [Cards]
+      operationId: getCard
+      summary: Retrieve a corporate card
+      description: Retrieves metadata, spending velocity controls and current status of an issued corporate card.
+      parameters:
+        - $ref: '#/components/parameters/CardId'
+      responses:
+        '200':
+          description: Corporate card details.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Card'}
+        '404': {$ref: '#/components/responses/NotFound'}
+
+  /cards/{card_id}/limits:
+    patch:
+      tags: [Cards]
+      operationId: updateCardLimits
+      summary: Update card spending limits
+      description: Updates daily and monthly spending caps or allowed merchant category codes (MCCs) for an active corporate card in real time.
+      parameters:
+        - $ref: '#/components/parameters/CardId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/SpendingLimits'}
+      responses:
+        '200':
+          description: Updated corporate card.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Card'}
+        '404': {$ref: '#/components/responses/NotFound'}
+
+  /fx/rates:
+    get:
+      tags: [FX & Treasury]
+      operationId: getFxRates
+      summary: Get live FX spot rates
+      description: Returns real-time interbank foreign exchange mid-market and executable rates for a currency pair.
+      parameters:
+        - name: base_currency
+          in: query
+          required: true
+          description: Three-letter ISO 4217 sell currency code.
+          schema: {type: string}
+        - name: target_currency
+          in: query
+          required: true
+          description: Three-letter ISO 4217 buy currency code.
+          schema: {type: string}
+      responses:
+        '200':
+          description: Live FX rate quote.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/FxRate'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+
+  /fx/quotes:
+    post:
+      tags: [FX & Treasury]
+      operationId: createFxQuote
+      summary: Lock an executable FX quote
+      description: Locks a guaranteed foreign exchange conversion rate for 30 seconds so the caller can execute a cross-currency transfer.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [base_currency, target_currency, sell_amount_cents]
+              properties:
+                base_currency: {type: string}
+                target_currency: {type: string}
+                sell_amount_cents: {type: integer}
+      responses:
+        '201':
+          description: Locked FX quote.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/FxRate'}
+
+  /compliance/kyc/{check_id}:
+    get:
+      tags: [Compliance & Webhooks]
+      operationId: getKycCheck
+      summary: Retrieve a KYC verification check
+      description: Retrieves the identity verification, beneficial ownership and sanctions screening result for an onboarding counterparty.
+      parameters:
+        - name: check_id
+          in: path
+          required: true
+          description: Unique identifier of the KYC compliance check.
+          schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: KYC check details.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/KycCheck'}
+        '404': {$ref: '#/components/responses/NotFound'}
+
+  /webhooks/endpoints:
+    post:
+      tags: [Compliance & Webhooks]
+      operationId: registerWebhook
+      summary: Register a webhook endpoint
+      description: Registers an HTTPS callback URL to receive signed real-time event notifications for transfers, ledger postings and card authorizations.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/WebhookCreate'}
+      responses:
+        '201':
+          description: The registered webhook endpoint including its HMAC signing secret.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/WebhookEndpoint'}
+
+  /webhooks/endpoints/{webhook_id}:
+    delete:
+      tags: [Compliance & Webhooks]
+      operationId: deleteWebhook
+      summary: Delete a webhook endpoint
+      description: Permanently deletes a webhook endpoint, immediately revokes its HMAC signing secret and cancels all pending event retry deliveries.
+      parameters:
+        - name: webhook_id
+          in: path
+          required: true
+          description: Unique identifier of the webhook endpoint.
+          schema: {type: string, format: uuid}
+      responses:
+        '204':
+          description: The webhook endpoint was deleted.
+        '404': {$ref: '#/components/responses/NotFound'}
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    Limit:
+      name: limit
+      in: query
+      required: false
+      description: Maximum number of records to return per page (1-200). Defaults to 50.
+      schema: {type: integer, minimum: 1, maximum: 200, default: 50}
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      description: Opaque pagination cursor from the previous response.
+      schema: {type: string}
+    AccountId:
+      name: account_id
+      in: path
+      required: true
+      description: Unique UUID identifier of the treasury account.
+      schema: {type: string, format: uuid}
+    TransferId:
+      name: transfer_id
+      in: path
+      required: true
+      description: Unique UUID identifier of the payment transfer.
+      schema: {type: string, format: uuid}
+    CardId:
+      name: card_id
+      in: path
+      required: true
+      description: Unique UUID identifier of the corporate card.
+      schema: {type: string, format: uuid}
+
+  responses:
+    BadRequest:
+      description: Validation failed on one or more request parameters.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+    Unauthorized:
+      description: Missing, expired or invalid bearer token.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+    NotFound:
+      description: The requested banking resource does not exist.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+
+  schemas:
+    Error:
+      type: object
+      required: [error_code, message]
+      properties:
+        error_code: {type: string}
+        message: {type: string}
+        request_id: {type: string}
+
+    AccountCreate:
+      type: object
+      required: [nickname, currency, entity_id]
+      properties:
+        nickname: {type: string, description: Human-readable label for the sub-account.}
+        currency: {type: string, description: Three-letter ISO 4217 currency code.}
+        entity_id: {type: string, format: uuid, description: Legal entity UUID that owns the account.}
+        purpose: {type: string, description: Optional treasury purpose classification.}
+
+    Account:
+      type: object
+      required: [id, nickname, currency, available_balance_cents, ledger_balance_cents, iban, status, created_at]
+      properties:
+        id: {type: string, format: uuid}
+        nickname: {type: string}
+        currency: {type: string}
+        available_balance_cents: {type: integer}
+        ledger_balance_cents: {type: integer}
+        iban: {type: string}
+        routing_number: {type: string}
+        status: {type: string, enum: [active, frozen, closed]}
+        created_at: {type: string, format: date-time}
+
+    AccountList:
+      type: object
+      required: [data, has_more]
+      properties:
+        data:
+          type: array
+          items: {$ref: '#/components/schemas/Account'}
+        has_more: {type: boolean}
+        next_cursor: {type: string}
+
+    Transaction:
+      type: object
+      required: [id, account_id, amount_cents, currency, direction, counterparty_name, posted_at]
+      properties:
+        id: {type: string, format: uuid}
+        account_id: {type: string, format: uuid}
+        amount_cents: {type: integer}
+        currency: {type: string}
+        direction: {type: string, enum: [credit, debit]}
+        counterparty_name: {type: string}
+        reference: {type: string}
+        posted_at: {type: string, format: date-time}
+
+    TransactionList:
+      type: object
+      required: [data, has_more]
+      properties:
+        data:
+          type: array
+          items: {$ref: '#/components/schemas/Transaction'}
+        has_more: {type: boolean}
+        next_cursor: {type: string}
+
+    Beneficiary:
+      type: object
+      required: [name, bank_routing_number, account_number, country]
+      properties:
+        name: {type: string}
+        bank_routing_number: {type: string}
+        account_number: {type: string}
+        iban: {type: string}
+        country: {type: string}
+
+    TransferCreate:
+      type: object
+      required: [source_account_id, amount_cents, currency, rail, beneficiary]
+      properties:
+        source_account_id: {type: string, format: uuid}
+        amount_cents: {type: integer}
+        currency: {type: string}
+        rail: {type: string, enum: [ach, wire, sepa, swift]}
+        beneficiary: {$ref: '#/components/schemas/Beneficiary'}
+        remittance_memo: {type: string}
+
+    Transfer:
+      type: object
+      required: [id, source_account_id, amount_cents, currency, rail, status, beneficiary, created_at]
+      properties:
+        id: {type: string, format: uuid}
+        source_account_id: {type: string, format: uuid}
+        amount_cents: {type: integer}
+        currency: {type: string}
+        rail: {type: string}
+        status: {type: string, enum: [pending, processing, settled, failed, recalled]}
+        trace_number: {type: string}
+        beneficiary: {$ref: '#/components/schemas/Beneficiary'}
+        created_at: {type: string, format: date-time}
+
+    TransferList:
+      type: object
+      required: [data, has_more]
+      properties:
+        data:
+          type: array
+          items: {$ref: '#/components/schemas/Transfer'}
+        has_more: {type: boolean}
+        next_cursor: {type: string}
+
+    SpendingLimits:
+      type: object
+      required: [daily_limit_cents, monthly_limit_cents]
+      properties:
+        daily_limit_cents: {type: integer}
+        monthly_limit_cents: {type: integer}
+        allowed_mcc_codes:
+          type: array
+          items: {type: string}
+
+    CardCreate:
+      type: object
+      required: [account_id, cardholder_name, cardholder_email, card_type, spending_limits]
+      properties:
+        account_id: {type: string, format: uuid}
+        cardholder_name: {type: string}
+        cardholder_email: {type: string, format: email}
+        card_type: {type: string, enum: [virtual, physical]}
+        spending_limits: {$ref: '#/components/schemas/SpendingLimits'}
+
+    Card:
+      type: object
+      required: [id, account_id, cardholder_name, cardholder_email, card_type, masked_pan, expiry_month, expiry_year, status, spending_limits]
+      properties:
+        id: {type: string, format: uuid}
+        account_id: {type: string, format: uuid}
+        cardholder_name: {type: string}
+        cardholder_email: {type: string, format: email}
+        card_type: {type: string}
+        masked_pan: {type: string}
+        expiry_month: {type: integer}
+        expiry_year: {type: integer}
+        status: {type: string, enum: [active, frozen, cancelled]}
+        spending_limits: {$ref: '#/components/schemas/SpendingLimits'}
+
+    CardList:
+      type: object
+      required: [data, has_more]
+      properties:
+        data:
+          type: array
+          items: {$ref: '#/components/schemas/Card'}
+        has_more: {type: boolean}
+
+    FxRate:
+      type: object
+      required: [quote_id, base_currency, target_currency, exchange_rate, expires_at]
+      properties:
+        quote_id: {type: string, format: uuid}
+        base_currency: {type: string}
+        target_currency: {type: string}
+        exchange_rate: {type: number}
+        buy_amount_cents: {type: integer}
+        expires_at: {type: string, format: date-time}
+
+    KycCheck:
+      type: object
+      required: [id, entity_name, status, risk_rating, verified_at]
+      properties:
+        id: {type: string, format: uuid}
+        entity_name: {type: string}
+        status: {type: string, enum: [pending, approved, rejected, manual_review]}
+        risk_rating: {type: string, enum: [low, medium, high]}
+        sanctions_hit: {type: boolean}
+        verified_at: {type: string, format: date-time}
+
+    WebhookCreate:
+      type: object
+      required: [url, subscribed_events]
+      properties:
+        url: {type: string, format: uri}
+        subscribed_events:
+          type: array
+          items: {type: string}
+        description: {type: string}
+
+    WebhookEndpoint:
+      type: object
+      required: [id, url, signing_secret, subscribed_events, active, created_at]
+      properties:
+        id: {type: string, format: uuid}
+        url: {type: string, format: uri}
+        signing_secret: {type: string}
+        subscribed_events:
+          type: array
+          items: {type: string}
+        active: {type: boolean}
+        created_at: {type: string, format: date-time}
+

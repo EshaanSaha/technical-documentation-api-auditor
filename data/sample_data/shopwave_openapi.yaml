@@ -1,0 +1,386 @@
+openapi: 3.0.3
+info:
+  title: ShopWave Commerce API
+  version: 2.3.0
+  description: REST API for managing customers, orders and the product catalogue of the ShopWave platform.
+servers:
+  - url: https://api.shopwave.io/v2
+security:
+  - bearerAuth: []
+tags:
+  - name: Customers
+  - name: Orders
+  - name: Products
+
+paths:
+  /customers:
+    get:
+      tags: [Customers]
+      operationId: listCustomers
+      summary: List customers
+      description: Returns a paginated list of customers, ordered by creation date with the newest customers first.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - name: email
+          in: query
+          required: false
+          description: Filter customers by exact email address.
+          schema: {type: string, format: email}
+      responses:
+        '200':
+          description: A page of customers.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CustomerList'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+    post:
+      tags: [Customers]
+      operationId: createCustomer
+      summary: Create a customer
+      description: Creates a new customer record. The email address must be unique across the account.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CustomerCreate'}
+      responses:
+        '201':
+          description: The customer was created.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Customer'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '409':
+          description: A customer with this email address already exists.
+
+  /customers/{customer_id}:
+    parameters:
+      - $ref: '#/components/parameters/CustomerId'
+    get:
+      tags: [Customers]
+      operationId: getCustomer
+      summary: Retrieve a customer
+      description: Retrieves the details of an existing customer by its unique identifier.
+      responses:
+        '200':
+          description: The customer.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Customer'}
+        '404': {$ref: '#/components/responses/NotFound'}
+    patch:
+      tags: [Customers]
+      operationId: updateCustomer
+      summary: Update a customer
+      description: Updates the specified customer by setting the values of the parameters passed. Fields that are not provided are left unchanged.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                full_name: {type: string}
+                phone: {type: string}
+                marketing_opt_in: {type: boolean}
+      responses:
+        '200':
+          description: The updated customer.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Customer'}
+        '404': {$ref: '#/components/responses/NotFound'}
+    delete:
+      tags: [Customers]
+      operationId: deleteCustomer
+      summary: Delete a customer
+      description: Permanently deletes a customer and all of their saved payment methods. This action cannot be undone.
+      responses:
+        '204':
+          description: The customer was deleted.
+        '404': {$ref: '#/components/responses/NotFound'}
+
+  /orders:
+    get:
+      tags: [Orders]
+      operationId: listOrders
+      summary: List orders
+      description: Returns a paginated list of orders. Orders can be filtered by status, customer and creation date.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - name: status
+          in: query
+          required: false
+          description: Only return orders with this fulfilment status.
+          schema: {type: string, enum: [pending, paid, shipped, cancelled]}
+        - name: customer_id
+          in: query
+          required: false
+          description: Only return orders placed by this customer.
+          schema: {type: string, format: uuid}
+        - name: created_after
+          in: query
+          required: false
+          description: Only return orders created after this timestamp (ISO 8601).
+          schema: {type: string, format: date-time}
+      responses:
+        '200':
+          description: A page of orders.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/OrderList'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+    post:
+      tags: [Orders]
+      operationId: createOrder
+      summary: Create an order
+      description: Creates a new order for a customer. Stock is reserved for every line item until the order is paid or cancelled.
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: false
+          description: Unique key that makes retried requests safe.
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/OrderCreate'}
+      responses:
+        '201':
+          description: The order was created.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Order'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '422':
+          description: One or more products are out of stock.
+
+  /orders/{order_id}:
+    get:
+      tags: [Orders]
+      operationId: getOrder
+      summary: Retrieve an order
+      description: Retrieves a single order, including its line items and shipping address.
+      parameters:
+        - $ref: '#/components/parameters/OrderId'
+        - name: include
+          in: query
+          required: false
+          description: Comma-separated list of related objects to expand, such as customer.
+          schema: {type: string}
+      responses:
+        '200':
+          description: The order.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Order'}
+        '404': {$ref: '#/components/responses/NotFound'}
+
+  /orders/{order_id}/cancel:
+    post:
+      tags: [Orders]
+      operationId: cancelOrder
+      summary: Cancel an order
+      description: Cancels an order that has not shipped yet and issues a full refund to the original payment method.
+      parameters:
+        - $ref: '#/components/parameters/OrderId'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+                  description: Free-text reason for the cancellation.
+      responses:
+        '200':
+          description: The cancelled order.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Order'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409':
+          description: The order has already shipped and can no longer be cancelled.
+
+  /products/{product_id}:
+    get:
+      tags: [Products]
+      operationId: getProduct
+      summary: Retrieve a product
+      description: Retrieves a product from the catalogue, including its current price and available stock.
+      parameters:
+        - name: product_id
+          in: path
+          required: true
+          description: Unique identifier of the product.
+          schema: {type: string}
+      responses:
+        '200':
+          description: The product.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Product'}
+        '404': {$ref: '#/components/responses/NotFound'}
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    Limit:
+      name: limit
+      in: query
+      required: false
+      description: Maximum number of objects to return, between 1 and 100. Defaults to 20.
+      schema: {type: integer, minimum: 1, maximum: 100, default: 20}
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      description: Opaque cursor returned by a previous request, used to fetch the next page.
+      schema: {type: string}
+    CustomerId:
+      name: customer_id
+      in: path
+      required: true
+      description: Unique identifier of the customer.
+      schema: {type: string, format: uuid}
+    OrderId:
+      name: order_id
+      in: path
+      required: true
+      description: Unique identifier of the order.
+      schema: {type: string, format: uuid}
+
+  responses:
+    BadRequest:
+      description: The request body failed validation.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+    Unauthorized:
+      description: The access token is missing or invalid.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+    NotFound:
+      description: The requested resource does not exist.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+
+  schemas:
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code: {type: string}
+        message: {type: string}
+
+    CustomerCreate:
+      type: object
+      required: [email, full_name]
+      properties:
+        email: {type: string, format: email, description: Unique email address of the customer.}
+        full_name: {type: string, description: Customer's full name.}
+        phone: {type: string, description: Phone number in E.164 format.}
+        marketing_opt_in: {type: boolean, description: Whether the customer agreed to receive marketing emails.}
+
+    Customer:
+      type: object
+      required: [id, email, full_name, created_at]
+      properties:
+        id: {type: string, format: uuid}
+        email: {type: string, format: email}
+        full_name: {type: string}
+        phone: {type: string}
+        marketing_opt_in: {type: boolean}
+        created_at: {type: string, format: date-time}
+
+    CustomerList:
+      type: object
+      required: [data, has_more]
+      properties:
+        data:
+          type: array
+          items: {$ref: '#/components/schemas/Customer'}
+        has_more: {type: boolean}
+        next_cursor: {type: string}
+
+    Address:
+      type: object
+      required: [line1, city, postal_code, country]
+      properties:
+        line1: {type: string}
+        city: {type: string}
+        postal_code: {type: string}
+        country: {type: string, description: Two-letter ISO 3166-1 country code.}
+
+    OrderItem:
+      type: object
+      required: [product_id, quantity]
+      properties:
+        product_id: {type: string}
+        quantity: {type: integer, minimum: 1}
+
+    OrderCreate:
+      type: object
+      required: [customer_id, items, currency, shipping_address]
+      properties:
+        customer_id: {type: string, format: uuid}
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/OrderItem'}
+        currency: {type: string, description: Three-letter ISO 4217 currency code.}
+        shipping_address: {$ref: '#/components/schemas/Address'}
+        notes: {type: string}
+
+    Order:
+      type: object
+      required: [id, status, customer_id, items, total_amount, currency, created_at]
+      properties:
+        id: {type: string, format: uuid}
+        status: {type: string, enum: [pending, paid, shipped, cancelled]}
+        customer_id: {type: string, format: uuid}
+        items:
+          type: array
+          items:
+            allOf:
+              - $ref: '#/components/schemas/OrderItem'
+              - type: object
+                properties:
+                  unit_price: {type: number}
+        total_amount: {type: number}
+        currency: {type: string}
+        shipping_address: {$ref: '#/components/schemas/Address'}
+        created_at: {type: string, format: date-time}
+
+    OrderList:
+      type: object
+      required: [data, has_more]
+      properties:
+        data:
+          type: array
+          items: {$ref: '#/components/schemas/Order'}
+        has_more: {type: boolean}
+        next_cursor: {type: string}
+
+    Product:
+      type: object
+      required: [id, name, price, currency, stock]
+      properties:
+        id: {type: string}
+        name: {type: string}
+        price: {type: number}
+        currency: {type: string}
+        stock: {type: integer}
+        active: {type: boolean}
+

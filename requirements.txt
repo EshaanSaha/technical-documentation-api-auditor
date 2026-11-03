@@ -1,0 +1,42 @@
+# Technical Documentation & API Consistency Auditor
+# Install inside the project virtual environment (.venv) only:
+#   pip install -r requirements.txt
+#
+# CPU-only PyTorch wheels (much smaller than CUDA builds; required by sentence-transformers)
+--extra-index-url https://download.pytorch.org/whl/cpu
+
+# --- Backend ---
+fastapi>=0.110,<1.0
+uvicorn>=0.29
+python-multipart>=0.0.9
+pydantic>=2.6,<3.0
+python-dotenv>=1.0
+
+# --- Frontend ---
+streamlit>=1.37,<2.0
+requests>=2.31
+plotly>=5.20
+pandas>=2.1
+
+# --- NLP ---
+spacy>=3.8,<3.9
+en_core_web_sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl
+torch>=2.2
+sentence-transformers>=2.7
+rapidfuzz>=3.6
+
+# --- Document processing ---
+PyMuPDF>=1.24
+python-docx>=1.1
+markdown-it-py>=3.0
+PyYAML>=6.0
+openapi-spec-validator>=0.7
+
+# --- Reporting ---
+openpyxl>=3.1
+reportlab>=4.1
+
+# --- Testing ---
+pytest>=8.0,<9.0
+httpx>=0.27
+
